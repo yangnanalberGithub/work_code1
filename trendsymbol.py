@@ -2,8 +2,8 @@
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
-import sklearn
-from scipy import stats
+
+
 import statsmodels.tsa.stattools as ts 
 
 
@@ -14,8 +14,8 @@ def trend_training(hist_data, window_length,  hts):
     steady_value = ts.adfuller(hist_data.values)
     if steady_value[0]<steady_value[4]['1%']:
         
-        trend ='steady'
-        
+#       trend ='steady'
+        pass
     else:
         return '历史数据存在变化趋势'
     
@@ -25,7 +25,7 @@ def trend_training(hist_data, window_length,  hts):
     
     #仿真真趋势数据
     sim_len = len(hist_data)
-    slope = hts/window_length #!!!
+    hts_unit = hts/window_length #!!!
     sim_data= pd.DataFrame(columns=['original'],data=hist_data.values, index=hist_data.index)
     sim_data['simdata']= np.ones(len(hist_data))
     sim_data['simdata'][0]=hist_data.mean()
@@ -35,18 +35,18 @@ def trend_training(hist_data, window_length,  hts):
         
         t2 =sim_data.index[i]
         delta_t = (t2 - t1).seconds
-        sim_data.loc[t2]['simdata']=sim_data.loc[t1]['simdata']+slope*delta_t
+        sim_data.loc[t2]['simdata']=sim_data.loc[t1]['simdata']+hts_unit*delta_t
         t1=sim_data.index[i]
     plt.figure()
     plt.plot(sim_data)
     print(sim_data.head())
-    return {"window":window_length,'hts':hts,'htc':htc},sim_data
+    return {"window":window_length,'hts':hts_unit,'htc':htc},sim_data
 
     
     
     
     
-def trend_identify(data,hts,htc):
+def trend_identify(data,hts_unit,htc):
 #     steady_value = ts.adfuller(data.values)
 #     if steady_value[0]<steady_value[4]['1%']:
 #         trend ='steady'
@@ -70,7 +70,9 @@ def trend_identify(data,hts,htc):
     while current_index<data.index[-1]:
 
         i+=1
+        
         current_index = data.index[i]
+        hts = (current_index-current_index_start).seconds * hts_unit
         #判断新点与前一片段是否连续
         Id = data[i]-list(trend_slices[-1].values())[len(trend_slices[-1])-1]
         if abs(Id)<htc: #表示新点与当前片段属于同一趋势
@@ -81,14 +83,15 @@ def trend_identify(data,hts,htc):
             if len(trend_slices[-1])>1:
                 trend_slices[-1].pop(list(trend_slices[-1].keys())[1])
             # 2 将新点作为末尾值
-            trend_slices[-1][current_index]=0.5*(list(trend_slices[-1].values())[0]+data[i])
+            trend_slices[-1][current_index]=data[i]
             #计算当前片段的最后一个值与前一片段最后一个值的差，是否>hts
             if len(trend_slices)==1:  #当只有一个片段时
                 I = list(trend_slices[0].values())[1]-list(trend_slices[0].values())[0]
                 if abs(I) <hts: #第一片段小于属于稳定
                     trend_names.pop()
                     trend_names.append(0)
-                    
+                    trend_slices[-1][current_index_start]=data[current_index_start:current_index].mean()
+                    trend_slices[-1].update({current_index_end:data[current_index_start:current_index].mean()})
                 else:
                     #说明原片段起始点与当前点之间存在趋势变化：
                     #1. 确实存在趋势变化
@@ -121,11 +124,14 @@ def trend_identify(data,hts,htc):
                     trend_slices[-1].update({current_index_start:data[current_index_start:current_index].mean()})
                     trend_slices[-1].update({current_index_end:data[current_index_start:current_index].mean()})
                 else:
-                    if i>10:
-                        steady_value = ts.adfuller(data[current_index_start:i].values)
+                    if (current_index-current_index_start).seconds>50:
+                        steady_value = ts.adfuller(data[current_index_start:current_index].values)
                         if steady_value[0]<steady_value[4]['1%']:#不存在趋势
                             trend_slices[-1][current_index_start]=data[current_index_start:current_index].mean()
+                            trend_slices[-1].update({current_index_end:data[current_index_start:current_index].mean()})
                         else:
+#                            当判断存在趋势，识别如下内容，？拟合直线，斜率计算
+                            
                             trend_names.pop()
                             if I>0:
                                 trend_names.append(1)
@@ -153,7 +159,7 @@ def trend_identify(data,hts,htc):
                     
     plt.figure()               
     for i in range(0,len(trend_slices)):
-        plt.plot(train_data[list(trend_slices[i].keys())[0]:list(trend_slices[i].keys())[len(trend_slices[i])-1]])
+        plt.plot(data[list(trend_slices[i].keys())[0]:list(trend_slices[i].keys())[len(trend_slices[i])-1]])
         plt.plot(list(trend_slices[i].keys()),list(trend_slices[i].values()))
     return trend_slices,trend_names
 
@@ -188,13 +194,13 @@ rng = pd.date_range('1/1/2018',periods=1000,freq='5S')
 rnd = np.random.RandomState(0)
 a = rnd.randn(1000)
 a[0:200]=a[0:200]+np.ones(200)*2
-a[200:500]=a[200:500]+np.linspace(2.01,5,300)
-a[500:1001]=a[500:1001]+np.ones(500)*5
-#test_data = pd.Series(a,index=rng)
+a[200:500]=a[200:500]+np.linspace(2.01,12,300)
+a[500:1001]=a[500:1001]+np.ones(500)*12
+test_data = pd.Series(a,index=rng)
 train_data = pd.Series(rnd.randn(1000),index=rng)
 
 parameter , _ = trend_training(train_data,500,5)
     
-trend_slice, names=trend_identify(train_data,parameter['hts'],parameter['htc'])    
+trend_slice, names=trend_identify(test_data,parameter['hts'],parameter['htc'])    
 print(trend_slice)
 print(names)
